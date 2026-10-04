@@ -22,6 +22,7 @@ const hiddenPointsStorageKey = 'shanghai-cinema-hidden-points-v1';
 const contributionDraftStorageKey = 'shanghai-cinema-contribution-drafts-v1';
 const contributorNameStorageKey = 'shanghai-cinema-contributor-name-v1';
 const collaborationConfig = window.CINEMA_MAP_COLLABORATION || {};
+const recoveredEdits = window.CINEMA_MAP_RECOVERED_EDITS || {};
 const onlineCollaborationRequested = Boolean(
   collaborationConfig.enabled &&
   collaborationConfig.supabaseUrl &&
@@ -32,12 +33,20 @@ const basePointIds = new Set(CINEMAS.map(item=>item.id));
 let customPoints = [];
 let hiddenPointIds = new Set();
 let publishedHiddenPointIds = new Set();
-let publishedMarkerStyles = {};
+let publishedMarkerStyles = {...(recoveredEdits.markerStyles || {})};
 let contributionDrafts = [];
 try { customPoints = JSON.parse(localStorage.getItem(customPointsStorageKey) || '[]'); } catch (_) { customPoints = []; }
 try { hiddenPointIds = new Set(JSON.parse(localStorage.getItem(hiddenPointsStorageKey) || '[]')); } catch (_) { hiddenPointIds = new Set(); }
 try { contributionDrafts = JSON.parse(localStorage.getItem(contributionDraftStorageKey) || '[]'); } catch (_) { contributionDrafts = []; }
 customPoints.filter(item=>item&&item.id&&!basePointIds.has(item.id)).forEach(item=>CINEMAS.push(item));
+const recoveredCoordinates = recoveredEdits.coordinateCorrections || {};
+CINEMAS.forEach(item => {
+  const recovered = recoveredCoordinates[item.id];
+  if (recovered && Number.isFinite(recovered.lat) && Number.isFinite(recovered.lng)) {
+    item.lat = recovered.lat;
+    item.lng = recovered.lng;
+  }
+});
 const originalCoordinates = Object.fromEntries(CINEMAS.map(item => [item.id, {lat:item.lat, lng:item.lng}]));
 let corrections = {};
 let markerStyles = {};
