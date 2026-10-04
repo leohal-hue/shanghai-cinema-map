@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>上海电影历史地图｜试验版</title>
+  <link rel="stylesheet" href="leaflet.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">SHANGHAI CINEMA HISTORY MAP</p>
+      <h1>上海电影历史地图</h1>
+      <p class="subtitle">民国时期电影院与电影放映场所 · 试验版</p>
+    </div>
+      <div class="topbar-actions">
+        <div class="source-note">资料底稿：黄德泉《民国上海影院概观》<br />已收录 127 条：86 条已有坐标，41 条待定位</div>
+        <button id="toggleContributionMode" type="button">参与补充资料</button>
+      </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-resizer">
+        <label for="sidebarWidth">侧栏宽度 <output id="sidebarWidthValue">360px</output></label>
+        <input id="sidebarWidth" type="range" min="280" max="560" step="10" value="360" />
+      </div>
+      <details class="sidebar-section intro-section">
+        <summary>项目说明</summary>
+        <div class="intro">
+          <span class="badge">第一阶段原型</span>
+          <p>这是一个持续补充的历史地图。点击地图上的点位，查看名称沿革、历史地址和资料出处。</p>
+        </div>
+      </details>
+      <details id="collaborationSection" class="sidebar-section collaboration-section" open>
+        <summary><span>多人协作</span><span id="collaborationBadge" class="summary-status">本地草稿</span></summary>
+        <div class="collaboration-panel">
+          <p>公开页面默认只读。进入贡献模式后，你可以调整点位或新增记录，再把修改作为建议提交；资料不会未经审核直接覆盖。</p>
+          <div id="contributionTools" hidden>
+            <div id="contributionCurrentPoint" class="contribution-current">请先从地图或列表选择一个点位</div>
+            <details class="contribution-fields" open>
+              <summary>编辑要提交的文字资料</summary>
+              <div class="contribution-fields-body">
+                <label for="collabPointName">名称
+                  <input id="collabPointName" type="text" maxlength="120" />
+                </label>
+                <div class="collaboration-grid">
+                  <label for="collabPointCategory">类型
+                    <select id="collabPointCategory">
+                      <option value="室内影院">室内影院</option>
+                      <option value="露天影院">露天影院</option>
+                      <option value="草创时期影院">草创时期影院</option>
+                      <option value="其他放映场所">其他放映场所</option>
+                    </select>
+                  </label>
+                  <label for="collabPointYear">开幕年份
+                    <input id="collabPointYear" type="number" min="1800" max="1949" />
+                  </label>
+                </div>
+                <label for="collabPointAliases">历史名称
+                  <input id="collabPointAliases" type="text" maxlength="500" />
+                </label>
+                <label for="collabPointAddress">历史地址
+                  <input id="collabPointAddress" type="text" maxlength="500" />
+                </label>
+                <label for="collabPointIntro">简介、经营者与重要事件
+                  <textarea id="collabPointIntro" rows="4" maxlength="3000"></textarea>
+                </label>
+                <label for="collabRecordSource">资料出处说明
+                  <input id="collabRecordSource" type="text" maxlength="800" placeholder="书名、档案号、报刊日期等" />
+                </label>
+              </div>
+            </details>
+            <label for="contributorName">贡献者署名
+              <input id="contributorName" type="text" maxlength="60" placeholder="姓名、昵称或机构，可留空" />
+            </label>
+            <label for="contributionSource">资料来源链接
+              <input id="contributionSource" type="url" maxlength="500" placeholder="网页、数字馆藏或公开资料链接，可留空" />
+            </label>
+            <label for="contributionNote">修改说明
+              <textarea id="contributionNote" rows="3" maxlength="1200" placeholder="请说明依据、需要修改的字段或仍待核实之处"></textarea>
+            </label>
+            <div class="contribution-actions">
+              <button id="submitPointChange" type="button">提交当前点位修改</button>
+              <button id="submitNewPoint" type="button">提交新增点位</button>
+              <button id="submitPointRemoval" type="button">建议删除当前点位</button>
+            </div>
+            <button id="exportContributionDrafts" class="secondary-contribution-button" type="button" disabled>导出本机待提交建议</button>
+          </div>
+          <div id="collaborationStatus" class="collaboration-status" aria-live="polite">当前为查阅模式；点击页面右上角“参与补充资料”开始。</div>
+        </div>
+      </details>
+      <details class="sidebar-section filter-hub" open>
+        <summary><span>筛选与观察</span><span id="filterStatus" class="summary-status">全部点位</span></summary>
+        <div class="controls filter-controls">
+          <label for="search">搜索名称或地址</label>
+          <input id="search" type="search" placeholder="输入影院名、旧名或地址" />
+          <div class="filter-grid">
+            <label for="category">点位类型
+              <select id="category"><option value="all">全部类型</option></select>
+            </label>
+            <label for="shapeFilter">点位形状
+              <select id="shapeFilter">
+                <option value="all">全部形状</option>
+                <option value="circle">圆形</option>
+                <option value="triangle">三角形</option>
+                <option value="quadrilateral">四边形</option>
+                <option value="square">仅正方形</option>
+                <option value="diamond">仅菱形</option>
+              </select>
+            </label>
+          </div>
+          <label class="check"><input id="onlyMapped" type="checkbox" /> 只看已有地图坐标的点位</label>
+          <details class="advanced-filter">
+            <summary>时间范围与播放</summary>
+            <div class="timeline-panel">
+              <div class="timeline-heading"><span>当前年份</span><strong id="timelineYearLabel">1949</strong></div>
+              <input id="timelineYear" type="range" min="1874" max="1949" step="1" value="1949" aria-label="选择年份" />
+              <div class="timeline-boundaries"><span>1874</span><span>1949</span></div>
+              <label for="timelineMode">观察模式</label>
+              <select id="timelineMode">
+                <option value="cumulative">截至该年出现过的影院</option>
+                <option value="new">只看该年新开影院</option>
+              </select>
+              <div class="timeline-actions">
+                <button id="previousYear" type="button">← 上一年</button>
+                <button id="playTimeline" type="button">▶ 播放</button>
+                <button id="nextYear" type="button">下一年 →</button>
+              </div>
+              <div id="timelineSummary" class="timeline-summary" aria-live="polite">截至1949年：显示全部收录记录</div>
+            </div>
+          </details>
+          <div class="filter-footer">
+            <span id="filterResult">显示全部点位</span>
+            <button id="resetFilters" type="button">重置筛选</button>
+          </div>
+        </div>
+      </details>
+      <details class="sidebar-section">
+        <summary>路名查找与高亮</summary>
+        <div class="road-search-panel">
+          <label for="roadSearch">输入当前路名</label>
+          <div class="road-search-row">
+            <input id="roadSearch" type="search" placeholder="例如：南京东路" />
+            <button id="searchRoad" type="button">查找</button>
+          </div>
+          <select id="roadResults" aria-label="选择道路搜索结果" hidden></select>
+          <button id="clearRoadHighlight" type="button" disabled>清除红色高亮</button>
+          <div id="roadSearchStatus" class="road-search-status" aria-live="polite">使用现代路名搜索；历史旧路名可能需要先换算。</div>
+        </div>
+      </details>
+      <details id="pointManagementSection" class="sidebar-section contribution-only">
+        <summary>手动新增与删除点位</summary>
+        <div class="point-manager">
+          <label for="newPointName">点位名称（必填）</label>
+          <input id="newPointName" type="text" placeholder="例如：某某电影院" />
+          <div class="point-manager-grid">
+            <label for="newPointCategory">类型
+              <select id="newPointCategory">
+                <option value="室内影院">室内影院</option>
+                <option value="露天影院">露天影院</option>
+                <option value="草创时期影院">草创时期影院</option>
+                <option value="其他放映场所">其他放映场所</option>
+              </select>
+            </label>
+            <label for="newPointYear">开幕年份
+              <input id="newPointYear" type="number" min="1800" max="1949" placeholder="可留空" />
+            </label>
+          </div>
+          <label for="newPointAddress">地址或位置线索</label>
+          <input id="newPointAddress" type="text" placeholder="可留空，以后补充" />
+          <label for="newPointIntro">备注</label>
+          <textarea id="newPointIntro" rows="3" placeholder="名称变更、经营者、重要事件等，可留空"></textarea>
+          <button id="startAddPoint" type="button">填写完成，去地图选点</button>
+          <button id="cancelAddPoint" type="button" hidden>取消新增</button>
+          <div id="addPointStatus" class="manager-status" aria-live="polite">新增点位先作为本机草稿保存，提交审核后才会公开。</div>
+          <button id="restoreDeletedPoints" class="secondary-manager-button" type="button" disabled>恢复已删除的资料点位</button>
+        </div>
+      </details>
+      <details id="editSection" class="sidebar-section contribution-only">
+        <summary>位置与样式编辑</summary>
+        <div class="position-editor" aria-live="polite">
+          <div id="selectedPlace" class="editor-status">请先在列表或地图上选择一个点位</div>
+          <div class="editor-actions">
+            <button id="editPosition" type="button" disabled>在地图上重新选点</button>
+            <button id="cancelEdit" type="button" hidden>取消选点</button>
+            <button id="resetPosition" type="button" disabled>恢复原坐标</button>
+          </div>
+          <div class="style-editor">
+            <label>颜色<input id="markerColor" type="color" value="#315b7d" disabled /></label>
+            <label>形状
+              <select id="markerShape" disabled>
+                <option value="circle">圆形</option>
+                <option value="square">正方形</option>
+                <option value="triangle">三角形</option>
+                <option value="diamond">菱形</option>
+              </select>
+            </label>
+          </div>
+          <div class="style-actions">
+            <button id="applyMarkerStyle" type="button" disabled>应用颜色和形状</button>
+            <button id="resetMarkerStyle" type="button" disabled>恢复默认样式</button>
+          </div>
+          <button id="deleteSelectedPoint" class="delete-point-button" type="button" disabled>删除当前选中点位</button>
+          <button id="exportCorrections" class="export-button" type="button">导出全部点位修正</button>
+        </div>
+      </details>
+      <details class="sidebar-section list-section" open>
+        <summary><span id="count">127 条记录</span><span class="muted">点击列表查看或补点</span></summary>
+        <div class="list-scroll-controls">
+          <button id="listScrollUp" type="button" aria-label="向上浏览点位">↑ 向上</button>
+          <button id="listScrollDown" type="button" aria-label="向下浏览点位">向下 ↓</button>
+        </div>
+        <div id="placeList" class="place-list"></div>
+      </details>
+    </aside>
+    <section class="map-wrap">
+      <div id="map"></div>
+      <div class="legend">
+        <div><span class="dot indoor"></span>室内影院</div>
+        <div><span class="dot outdoor"></span>露天影院</div>
+        <div><span class="dot early"></span>草创时期影院</div>
+        <div><span class="dot" style="background:#77558a"></span>其他放映场所</div>
+        <div><span class="uncertain">≈</span>初步定位 / 待核验</div>
+      </div>
+      <div class="map-credit">底图 © OpenStreetMap contributors</div>
+    </section>
+  </main>
+  <script src="leaflet.js"></script>
+  <script src="collaboration-config.js"></script>
+  <script src="data.js?v=10"></script>
+  <script src="app.js?v=13"></script>
+</body>
+</html>
