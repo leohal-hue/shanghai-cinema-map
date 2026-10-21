@@ -137,8 +137,8 @@
           </div>
         </div>
       </details>
-      <details class="sidebar-section">
-        <summary>路名查找与高亮</summary>
+      <details class="sidebar-section road-workspace-section" open>
+        <summary><span>道路与边界</span><span id="roadCount" class="summary-status">未添加</span></summary>
         <div class="road-search-panel">
           <label for="roadSearch">输入当前路名</label>
           <div class="road-search-row">
@@ -146,8 +146,24 @@
             <button id="searchRoad" type="button">查找</button>
           </div>
           <select id="roadResults" aria-label="选择道路搜索结果" hidden></select>
-          <button id="clearRoadHighlight" type="button" disabled>清除红色高亮</button>
+          <div class="road-preview-actions">
+            <button id="addRoadToWorkspace" type="button" disabled>保留这条道路</button>
+            <button id="clearRoadHighlight" type="button" disabled>清除预览</button>
+          </div>
           <div id="roadSearchStatus" class="road-search-status" aria-live="polite">使用现代路名搜索；历史旧路名可能需要先换算。</div>
+          <div class="road-workspace-heading">
+            <strong>已保留的道路</strong>
+            <span>自动保存在当前浏览器</span>
+          </div>
+          <div id="roadWorkspaceList" class="road-workspace-list"></div>
+          <div class="road-workspace-actions">
+            <button id="fitSavedRoads" type="button" disabled>查看全部道路</button>
+            <button id="toggleCinemaPoints" type="button">隐藏影院点位</button>
+            <button id="exportRoadGeoJson" type="button" disabled>导出 GeoJSON</button>
+            <button id="clearSavedRoads" class="road-danger-button" type="button" disabled>清空道路组合</button>
+          </div>
+          <button id="enterScreenshotMode" class="road-screenshot-button" type="button">进入纯净截图模式</button>
+          <p class="road-help">截图模式会隐藏侧栏、标题和影院点位；按 Esc 或右上角按钮退出。</p>
         </div>
       </details>
       <details id="pointManagementSection" class="sidebar-section contribution-only">
@@ -217,6 +233,7 @@
     </aside>
     <section class="map-wrap">
       <div id="map"></div>
+      <button id="exitScreenshotMode" class="screenshot-exit" type="button" hidden>退出截图模式</button>
       <div class="legend">
         <div><span class="dot indoor"></span>室内影院</div>
         <div><span class="dot outdoor"></span>露天影院</div>
@@ -231,6 +248,6 @@
   <script src="collaboration-config.js"></script>
   <script src="data.js?v=10"></script>
   <script src="recovered-edits.js?v=1"></script>
-  <script src="app.js?v=14"></script>
+  <script src="app.js?v=15"></script>
 </body>
 </html>

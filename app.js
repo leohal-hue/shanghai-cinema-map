@@ -21,6 +21,7 @@ const customPointsStorageKey = 'shanghai-cinema-custom-points-v1';
 const hiddenPointsStorageKey = 'shanghai-cinema-hidden-points-v1';
 const contributionDraftStorageKey = 'shanghai-cinema-contribution-drafts-v1';
 const contributorNameStorageKey = 'shanghai-cinema-contributor-name-v1';
+const roadWorkspaceStorageKey = 'shanghai-cinema-road-workspace-v1';
 const collaborationConfig = window.CINEMA_MAP_COLLABORATION || {};
 const recoveredEdits = window.CINEMA_MAP_RECOVERED_EDITS || {};
 const onlineCollaborationRequested = Boolean(
@@ -35,9 +36,14 @@ let hiddenPointIds = new Set();
 let publishedHiddenPointIds = new Set();
 let publishedMarkerStyles = {...(recoveredEdits.markerStyles || {})};
 let contributionDrafts = [];
+let savedRoads = [];
 try { customPoints = JSON.parse(localStorage.getItem(customPointsStorageKey) || '[]'); } catch (_) { customPoints = []; }
 try { hiddenPointIds = new Set(JSON.parse(localStorage.getItem(hiddenPointsStorageKey) || '[]')); } catch (_) { hiddenPointIds = new Set(); }
 try { contributionDrafts = JSON.parse(localStorage.getItem(contributionDraftStorageKey) || '[]'); } catch (_) { contributionDrafts = []; }
+try {
+  const storedRoads=JSON.parse(localStorage.getItem(roadWorkspaceStorageKey) || '[]');
+  savedRoads=Array.isArray(storedRoads)?storedRoads.filter(road=>road&&road.id&&road.feature):[];
+} catch (_) { savedRoads = []; }
 customPoints.filter(item=>item&&item.id&&!basePointIds.has(item.id)).forEach(item=>CINEMAS.push(item));
 const recoveredCoordinates = recoveredEdits.coordinateCorrections || {};
 CINEMAS.forEach(item => {
@@ -88,6 +94,15 @@ const searchRoad = document.querySelector('#searchRoad');
 const roadResults = document.querySelector('#roadResults');
 const clearRoadHighlight = document.querySelector('#clearRoadHighlight');
 const roadSearchStatus = document.querySelector('#roadSearchStatus');
+const addRoadToWorkspace = document.querySelector('#addRoadToWorkspace');
+const roadWorkspaceList = document.querySelector('#roadWorkspaceList');
+const roadCount = document.querySelector('#roadCount');
+const fitSavedRoads = document.querySelector('#fitSavedRoads');
+const toggleCinemaPoints = document.querySelector('#toggleCinemaPoints');
+const exportRoadGeoJson = document.querySelector('#exportRoadGeoJson');
+const clearSavedRoads = document.querySelector('#clearSavedRoads');
+const enterScreenshotMode = document.querySelector('#enterScreenshotMode');
+const exitScreenshotMode = document.querySelector('#exitScreenshotMode');
 const timelineYearInput = document.querySelector('#timelineYear');
 const timelineYearLabel = document.querySelector('#timelineYearLabel');
 const timelineMode = document.querySelector('#timelineMode');
@@ -130,6 +145,10 @@ let isPickingPosition = false;
 let isAddingPoint = false;
 let roadHighlightLayer = null;
 let roadSearchFeatures = [];
+let currentRoadPreview = null;
+let cinemaMarkersVisible = true;
+let cinemaMarkersBeforeScreenshot = true;
+const savedRoadLayers = new Map();
 let currentTimelineYear = 1949;
 let timelineTimer = null;
 let contributionMode = false;
@@ -277,7 +296,7 @@ function render(){
     const marker=markers.get(item.id);
     if(!marker)return;
     marker.setIcon(markerIcon(item));
-    if(visibleIds.has(item.id)){
+    if(visibleIds.has(item.id)&&cinemaMarkersVisible){
       if(!map.hasLayer(marker))marker.addTo(map);
       marker.setOpacity(timelineMode.value==='cumulative'&&Number(item.year)<currentTimelineYear ? 0.65 : 1);
     }else if(map.hasLayer(marker))map.removeLayer(marker);
@@ -286,6 +305,7 @@ function render(){
 
 addMarkers();
 render();
+renderRoadWorkspace();
 [search,category,shapeFilter,onlyMapped].forEach(el=>el.addEventListener('input',render));
 resetFilters.addEventListener('click',()=>{
   stopTimeline();
@@ -552,12 +572,15 @@ exportContributionDrafts.addEventListener('click',exportLocalContributionDrafts)
 
 function clearRoad(){
   if(roadHighlightLayer){map.removeLayer(roadHighlightLayer);roadHighlightLayer=null;}
+  currentRoadPreview=null;
   clearRoadHighlight.disabled=true;
+  addRoadToWorkspace.disabled=true;
 }
 
-function highlightRoad(feature){
+function highlightRoad(preview){
   clearRoad();
-  roadHighlightLayer=L.geoJSON(feature,{
+  currentRoadPreview=preview;
+  roadHighlightLayer=L.geoJSON(preview.feature,{
     pane:'roadHighlightPane',
     style:{color:'#d71920',weight:8,opacity:.9,lineCap:'round',lineJoin:'round'},
     pointToLayer:(_,latlng)=>L.circle(latlng,{pane:'roadHighlightPane',radius:180,color:'#d71920',weight:5,fillColor:'#e53935',fillOpacity:.2})
@@ -565,30 +588,103 @@ function highlightRoad(feature){
   const bounds=roadHighlightLayer.getBounds();
   if(bounds.isValid())map.fitBounds(bounds.pad(.18),{maxZoom:17});
   clearRoadHighlight.disabled=false;
-  const name=feature.properties?.display_name||feature.properties?.name||roadSearch.value.trim();
-  const isPoint=feature.geometry?.type==='Point';
-  roadSearchStatus.textContent=isPoint?`已定位：${name}。地图服务仅返回中心位置，使用红圈标示。`:`已用红线高亮：${name}`;
+  addRoadToWorkspace.disabled=false;
+  const segmentCount=preview.feature.type==='FeatureCollection'?preview.feature.features.length:1;
+  roadSearchStatus.textContent=`已找到“${preview.name}”的 ${segmentCount} 段道路轨迹。确认无误后点击“保留这条道路”。`;
   roadSearchStatus.className='road-search-status success';
+}
+
+function escapeOverpassValue(value){
+  return String(value).replace(/\\/g,'\\\\').replace(/"/g,'\\"');
+}
+
+function overpassRoadFeature(data,name){
+  const seen=new Set();
+  const features=(data.elements||[]).filter(element=>element.type==='way'&&Array.isArray(element.geometry)&&element.geometry.length>1).filter(element=>{
+    if(seen.has(element.id))return false;
+    seen.add(element.id);
+    return true;
+  }).map(element=>({
+    type:'Feature',
+    properties:{osmId:element.id,name:element.tags?.name||element.tags?.['name:zh']||name,highway:element.tags?.highway||''},
+    geometry:{type:'LineString',coordinates:element.geometry.map(point=>[point.lon,point.lat])}
+  }));
+  return features.length?{type:'FeatureCollection',features}:null;
+}
+
+async function fetchWholeRoad(name){
+  const safeName=escapeOverpassValue(name);
+  const bbox='30.65,120.80,31.90,122.15';
+  const query=`[out:json][timeout:25];(way["highway"]["name"="${safeName}"](${bbox});way["highway"]["name:zh"="${safeName}"](${bbox});way["highway"]["alt_name"="${safeName}"](${bbox}););out tags geom;`;
+  const endpoints=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+  let lastError=null;
+  for(const endpoint of endpoints){
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),14000);
+    try{
+      const response=await fetch(endpoint,{
+        method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},
+        body:new URLSearchParams({data:query}),
+        signal:controller.signal
+      });
+      if(!response.ok)throw new Error(`HTTP ${response.status}`);
+      const feature=overpassRoadFeature(await response.json(),name);
+      clearTimeout(timeout);
+      return feature;
+    }catch(error){
+      clearTimeout(timeout);
+      lastError=error;
+    }
+  }
+  throw lastError||new Error('道路数据服务无响应');
+}
+
+async function fetchRoadSearchFallback(query){
+  const params=new URLSearchParams({
+    format:'geojson',
+    limit:'40',
+    dedupe:'0',
+    polygon_geojson:'1',
+    countrycodes:'cn',
+    bounded:'1',
+    viewbox:'120.80,31.90,122.15,30.65',
+    q:`${query}, 上海市`
+  });
+  const response=await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`,{headers:{Accept:'application/geo+json'}});
+  if(!response.ok)throw new Error(`HTTP ${response.status}`);
+  const data=await response.json();
+  return (data.features||[]).filter(feature=>['LineString','MultiLineString'].includes(feature.geometry?.type)).map(feature=>({
+    name:feature.properties?.name||query,
+    label:feature.properties?.display_name||feature.properties?.name||query,
+    feature,
+    source:'Nominatim'
+  }));
 }
 
 async function findRoad(){
   const query=roadSearch.value.trim();
   if(!query){roadSearchStatus.textContent='请先输入路名。';roadSearchStatus.className='road-search-status error';return;}
   searchRoad.disabled=true;
-  roadSearchStatus.textContent='正在上海范围内查找道路……';
+  addRoadToWorkspace.disabled=true;
+  roadSearchStatus.textContent='正在上海范围内拼接整条道路，请稍候……';
   roadSearchStatus.className='road-search-status';
   roadResults.hidden=true;
   try{
-    const params=new URLSearchParams({format:'geojson',limit:'8',polygon_geojson:'1',countrycodes:'cn',q:`${query}, 上海市`});
-    const response=await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`,{headers:{Accept:'application/geo+json'}});
-    if(!response.ok)throw new Error(`HTTP ${response.status}`);
-    const data=await response.json();
-    const all=data.features||[];
-    const roads=all.filter(feature=>{
-      const p=feature.properties||{};
-      return p.category==='highway'||p.addresstype==='road'||['road','street','residential','primary','secondary','tertiary','trunk'].includes(p.type);
-    });
-    roadSearchFeatures=roads.length?roads:all;
+    let fallbackRoads=[];
+    try{fallbackRoads=await fetchRoadSearchFallback(query);}catch(_){fallbackRoads=[];}
+    if(fallbackRoads.length){
+      const combinedFeatures=fallbackRoads.flatMap(result=>result.feature.type==='FeatureCollection'?result.feature.features:[result.feature]);
+      roadSearchFeatures=[{
+        name:query,
+        label:`${query}（已拼接 ${combinedFeatures.length} 段）`,
+        feature:{type:'FeatureCollection',features:combinedFeatures},
+        source:'Nominatim'
+      }];
+    }else{
+      const wholeRoad=await fetchWholeRoad(query);
+      roadSearchFeatures=wholeRoad?[{name:query,label:`${query}（完整道路轨迹）`,feature:wholeRoad,source:'Overpass'}]:[];
+    }
     if(!roadSearchFeatures.length){
       clearRoad();
       roadSearchStatus.textContent=`没有找到“${query}”。如果是历史路名，请改用对应的现代路名。`;
@@ -599,7 +695,7 @@ async function findRoad(){
     roadSearchFeatures.forEach((feature,index)=>{
       const option=document.createElement('option');
       option.value=String(index);
-      option.textContent=feature.properties?.display_name||feature.properties?.name||`${query}（结果 ${index+1}）`;
+      option.textContent=feature.label||`${query}（结果 ${index+1}）`;
       roadResults.appendChild(option);
     });
     roadResults.hidden=roadSearchFeatures.length<2;
@@ -613,14 +709,165 @@ async function findRoad(){
   }
 }
 
+function persistSavedRoads(){
+  try{
+    localStorage.setItem(roadWorkspaceStorageKey,JSON.stringify(savedRoads));
+  }catch(error){
+    roadSearchStatus.textContent='道路组合过大，浏览器无法继续保存。请先导出 GeoJSON 或删除部分道路。';
+    roadSearchStatus.className='road-search-status error';
+  }
+}
+
+function refreshSavedRoadLayers(){
+  savedRoadLayers.forEach(layer=>map.removeLayer(layer));
+  savedRoadLayers.clear();
+  savedRoads.forEach(road=>{
+    const layer=L.geoJSON(road.feature,{
+      pane:'roadHighlightPane',
+      interactive:false,
+      style:{color:road.color||'#d71920',weight:Number(road.weight)||7,opacity:.92,lineCap:'round',lineJoin:'round'}
+    });
+    savedRoadLayers.set(road.id,layer);
+    if(road.visible!==false)layer.addTo(map);
+  });
+}
+
+function fitRoadLayer(layer){
+  const bounds=layer?.getBounds?.();
+  if(bounds?.isValid())map.fitBounds(bounds.pad(.12),{maxZoom:17});
+}
+
+function renderRoadWorkspace(){
+  refreshSavedRoadLayers();
+  roadCount.textContent=savedRoads.length?`${savedRoads.length} 条道路`:'未添加';
+  fitSavedRoads.disabled=!savedRoads.length;
+  exportRoadGeoJson.disabled=!savedRoads.length;
+  clearSavedRoads.disabled=!savedRoads.length;
+  if(!savedRoads.length){
+    roadWorkspaceList.innerHTML='<div class="road-empty">搜索道路后点击“保留这条道路”，可同时比较多条道路。</div>';
+    return;
+  }
+  roadWorkspaceList.innerHTML=savedRoads.map(road=>`<article class="saved-road" data-road-id="${escapeHtml(road.id)}">
+    <div class="saved-road-heading">
+      <label class="saved-road-visible"><input type="checkbox" data-road-toggle ${road.visible===false?'':'checked'} /><span class="saved-road-swatch" style="background:${escapeHtml(road.color||'#d71920')}"></span><strong>${escapeHtml(road.name)}</strong></label>
+      <button type="button" data-road-locate>定位</button>
+    </div>
+    <div class="saved-road-controls">
+      <label>颜色<input type="color" data-road-color value="${escapeHtml(road.color||'#d71920')}" /></label>
+      <label class="saved-road-width">粗细<input type="range" data-road-width min="3" max="14" step="1" value="${Number(road.weight)||7}" /><output>${Number(road.weight)||7}</output></label>
+      <button type="button" data-road-remove>删除</button>
+    </div>
+  </article>`).join('');
+  roadWorkspaceList.querySelectorAll('.saved-road').forEach(card=>{
+    const id=card.dataset.roadId;
+    const road=()=>savedRoads.find(item=>item.id===id);
+    card.querySelector('[data-road-toggle]').addEventListener('change',event=>{
+      road().visible=event.target.checked;
+      persistSavedRoads();
+      renderRoadWorkspace();
+    });
+    card.querySelector('[data-road-color]').addEventListener('change',event=>{
+      road().color=event.target.value;
+      persistSavedRoads();
+      renderRoadWorkspace();
+    });
+    card.querySelector('[data-road-width]').addEventListener('change',event=>{
+      road().weight=Number(event.target.value);
+      persistSavedRoads();
+      renderRoadWorkspace();
+    });
+    card.querySelector('[data-road-locate]').addEventListener('click',()=>fitRoadLayer(savedRoadLayers.get(id)));
+    card.querySelector('[data-road-remove]').addEventListener('click',()=>{
+      if(!window.confirm(`从道路组合中删除“${road().name}”吗？`))return;
+      savedRoads=savedRoads.filter(item=>item.id!==id);
+      persistSavedRoads();
+      renderRoadWorkspace();
+    });
+  });
+}
+
 searchRoad.addEventListener('click',findRoad);
 roadSearch.addEventListener('keydown',event=>{if(event.key==='Enter')findRoad();});
 roadResults.addEventListener('change',()=>highlightRoad(roadSearchFeatures[Number(roadResults.value)]));
+addRoadToWorkspace.addEventListener('click',()=>{
+  if(!currentRoadPreview)return;
+  const duplicate=savedRoads.find(road=>road.name.trim().toLowerCase()===currentRoadPreview.name.trim().toLowerCase());
+  if(duplicate){
+    roadSearchStatus.textContent=`“${duplicate.name}”已经在道路组合中。`;
+    roadSearchStatus.className='road-search-status error';
+    fitRoadLayer(savedRoadLayers.get(duplicate.id));
+    return;
+  }
+  const palette=['#d71920','#315b7d','#d97706','#7c3aed','#07847e','#b42375'];
+  const road={
+    id:`ROAD-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+    name:currentRoadPreview.name,
+    color:palette[savedRoads.length%palette.length],
+    weight:7,
+    visible:true,
+    feature:currentRoadPreview.feature,
+    source:currentRoadPreview.source,
+    addedAt:new Date().toISOString()
+  };
+  savedRoads.push(road);
+  persistSavedRoads();
+  clearRoad();
+  renderRoadWorkspace();
+  fitRoadLayer(savedRoadLayers.get(road.id));
+  roadSearchStatus.textContent=`已保留“${road.name}”。可以继续搜索下一条道路。`;
+  roadSearchStatus.className='road-search-status success';
+});
 clearRoadHighlight.addEventListener('click',()=>{
   clearRoad();
-  roadSearchStatus.textContent='已清除道路高亮。';
+  roadSearchStatus.textContent='已清除搜索预览；已保留的道路不受影响。';
   roadSearchStatus.className='road-search-status';
 });
+fitSavedRoads.addEventListener('click',()=>{
+  const visibleLayers=[...savedRoadLayers.entries()].filter(([id])=>savedRoads.find(road=>road.id===id)?.visible!==false).map(([,layer])=>layer);
+  if(visibleLayers.length)fitRoadLayer(L.featureGroup(visibleLayers));
+});
+toggleCinemaPoints.addEventListener('click',()=>{
+  cinemaMarkersVisible=!cinemaMarkersVisible;
+  toggleCinemaPoints.textContent=cinemaMarkersVisible?'隐藏影院点位':'显示影院点位';
+  render();
+});
+exportRoadGeoJson.addEventListener('click',()=>{
+  const features=savedRoads.flatMap(road=>{
+    const sourceFeatures=road.feature.type==='FeatureCollection'?road.feature.features:[road.feature];
+    return sourceFeatures.map(feature=>({...feature,properties:{...(feature.properties||{}),workspaceRoadId:road.id,workspaceRoadName:road.name,color:road.color,weight:road.weight,visible:road.visible!==false}}));
+  });
+  const blob=new Blob([JSON.stringify({type:'FeatureCollection',features},null,2)],{type:'application/geo+json'});
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement('a');
+  link.href=url;
+  link.download='上海电影地图_道路组合.geojson';
+  link.click();
+  URL.revokeObjectURL(url);
+});
+clearSavedRoads.addEventListener('click',()=>{
+  if(!savedRoads.length||!window.confirm('确定清空当前保存的全部道路吗？'))return;
+  savedRoads=[];
+  persistSavedRoads();
+  renderRoadWorkspace();
+  roadSearchStatus.textContent='已清空道路组合。';
+  roadSearchStatus.className='road-search-status';
+});
+function setScreenshotMode(active){
+  if(active){
+    cinemaMarkersBeforeScreenshot=cinemaMarkersVisible;
+    cinemaMarkersVisible=false;
+  }else{
+    cinemaMarkersVisible=cinemaMarkersBeforeScreenshot;
+  }
+  document.body.classList.toggle('screenshot-mode',active);
+  exitScreenshotMode.hidden=!active;
+  toggleCinemaPoints.textContent=cinemaMarkersVisible?'隐藏影院点位':'显示影院点位';
+  render();
+  requestAnimationFrame(()=>map.invalidateSize());
+}
+enterScreenshotMode.addEventListener('click',()=>setScreenshotMode(true));
+exitScreenshotMode.addEventListener('click',()=>setScreenshotMode(false));
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&document.body.classList.contains('screenshot-mode'))setScreenshotMode(false);});
 startAddPoint.addEventListener('click',()=>{
   const name=newPointName.value.trim();
   if(!name){
